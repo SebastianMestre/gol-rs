@@ -2,6 +2,7 @@
 use rand::Rng;
 use std::thread;
 use std::time::Duration;
+use std::collections::BTreeMap as Map;
 
 #[derive(Debug)]
 #[derive(Clone)]
@@ -26,11 +27,13 @@ enum Expr {
 
 	// Other
 	IfThenElse(Box<Expr>, Box<Expr>, Box<Expr>),
-	// Let(String, Expr, Expr),
+	Identifier(String),
+	Let(String, Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug)]
 #[derive(PartialEq)]
+#[derive(Clone)]
 enum Value {
 	State(String),
 	Bool(bool),
@@ -39,7 +42,9 @@ enum Value {
 
 const N: usize = 150;
 
-fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
+type Environment = Map<String, Value>;
+
+fn eval(env: &mut Environment, e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 	match e {
 		Expr::State(s) => Value::State(s.clone()),
 		Expr::Int(n) => Value::Int(*n),
@@ -48,10 +53,10 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			let nj = ((j + dj).rem_euclid(N as i32)) as usize;
 			Value::State(cells[ni][nj].clone().into())
 		}
-		Expr::Equals(e1, e2) => Value::Bool(eval(e1, cells, i, j) == eval(e2, cells, i, j)),
+		Expr::Equals(e1, e2) => Value::Bool(eval(env, e1, cells, i, j) == eval(env, e2, cells, i, j)),
 		Expr::LessThan(e1, e2) => {
-			if let Value::Int(n1) = eval(e1, cells, i, j) {
-				if let Value::Int(n2) = eval(e2, cells, i, j) {
+			if let Value::Int(n1) = eval(env, e1, cells, i, j) {
+				if let Value::Int(n2) = eval(env, e2, cells, i, j) {
 					Value::Bool(n1 < n2)
 				} else {
 					Value::Bool(false)
@@ -61,8 +66,8 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			}
 		}
 		Expr::GreaterThan(e1, e2) => {
-			if let Value::Int(n1) = eval(e1, cells, i, j) {
-				if let Value::Int(n2) = eval(e2, cells, i, j) {
+			if let Value::Int(n1) = eval(env, e1, cells, i, j) {
+				if let Value::Int(n2) = eval(env, e2, cells, i, j) {
 					Value::Bool(n1 > n2)
 				} else {
 					Value::Bool(false)
@@ -72,8 +77,8 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			}
 		}
 		Expr::And(e1, e2) => {
-			if let Value::Bool(b1) = eval(e1, cells, i, j) {
-				if let Value::Bool(b2) = eval(e2, cells, i, j) {
+			if let Value::Bool(b1) = eval(env, e1, cells, i, j) {
+				if let Value::Bool(b2) = eval(env, e2, cells, i, j) {
 					Value::Bool(b1 && b2)
 				} else {
 					Value::Bool(false)
@@ -83,8 +88,8 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			}
 		}
 		Expr::Or(e1, e2) => {
-			if let Value::Bool(b1) = eval(e1, cells, i, j) {
-				if let Value::Bool(b2) = eval(e2, cells, i, j) {
+			if let Value::Bool(b1) = eval(env, e1, cells, i, j) {
+				if let Value::Bool(b2) = eval(env, e2, cells, i, j) {
 					Value::Bool(b1 || b2)
 				} else {
 					Value::Bool(false)
@@ -94,22 +99,22 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			}
 		}
 		Expr::Not(e) => {
-			if let Value::Bool(b) = eval(e, cells, i, j) {
+			if let Value::Bool(b) = eval(env, e, cells, i, j) {
 				Value::Bool(!b)
 			} else {
 				Value::Bool(false)
 			}
 		}
 		Expr::IfThenElse(c, t, f) => {
-			if eval(c, cells, i, j) == Value::Bool(true) {
-				eval(t, cells, i, j)
+			if eval(env, c, cells, i, j) == Value::Bool(true) {
+				eval(env, t, cells, i, j)
 			} else {
-				eval(f, cells, i, j)
+				eval(env, f, cells, i, j)
 			}
 		}
 		Expr::Add(e1, e2) => {
-			let v1 = eval(e1, cells, i, j);
-			let v2 = eval(e2, cells, i, j);
+			let v1 = eval(env, e1, cells, i, j);
+			let v2 = eval(env, e2, cells, i, j);
 			if let Value::Int(n1) = v1 {
 				if let Value::Int(n2) = v2 {
 					Value::Int(n1 + n2)
@@ -121,8 +126,8 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			}
 		}
 		Expr::Sub(e1, e2) => {
-			let v1 = eval(e1, cells, i, j);
-			let v2 = eval(e2, cells, i, j);
+			let v1 = eval(env, e1, cells, i, j);
+			let v2 = eval(env, e2, cells, i, j);
 			if let Value::Int(n1) = v1 {
 				if let Value::Int(n2) = v2 {
 					Value::Int(n1 - n2)
@@ -132,6 +137,21 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			} else {
 				Value::Int(0)
 			}
+		}
+		Expr::Identifier(s) => {
+			if let Some(v) = env.get(s) {
+				(*v).clone()
+			} else {
+				Value::Int(0)
+			}
+		}
+		Expr::Let(s, edef, ebody) => {
+			// Rust won't let you inline this variable!
+			// Because of "overlapping mutable borrows"
+			// If they are in separate statements, it works!
+			let v = eval(env, edef, cells, i, j);
+			env.insert(s.to_string(), v);
+			eval(env, ebody, cells, i, j)
 		}
 	}
 }
@@ -157,7 +177,8 @@ fn apply(e: &Expr, cells: &[[String; N]; N]) -> [[String; N]; N] {
 
 	for i in 0..N {
 		for j in 0..N {
-			if let Value::State(s) = eval(e, cells, i as i32, j as i32) {
+			let mut environment: Environment = Map::new();
+			if let Value::State(s) = eval(&mut environment, e, cells, i as i32, j as i32) {
 				result[i as usize][j as usize] = s;
 			}
 		}
@@ -185,8 +206,22 @@ fn main() {
 
 
 	// Hard-code typical Game of Life rules:
-	let neighbor_count =
-		Expr::Add(
+	// let n = (if [1, -1] == Alive then 1 else 0) +
+	// 	(if [1,  0] == Alive then 1 else 0) +
+	// 	(if [1,  1] == Alive then 1 else 0) +
+	// 	(if [0, -1] == Alive then 1 else 0) +
+	// 	(if [0,  1] == Alive then 1 else 0) +
+	// 	(if [1, -1] == Alive then 1 else 0) +
+	// 	(if [1,  0] == Alive then 1 else 0) +
+	// 	(if [1,  1] == Alive then 1 else 0)
+	// in
+	// 	if [0, 0] == Alive and (n == 2 or n == 3) then Alive
+	// 	else if [0, 0] == Dead and n == 3 then Alive
+	// 	else Dead
+
+	let expr: Expr = Expr::Let(
+		"n".to_string(),
+		Box::new(Expr::Add(
 		Box::new(Expr::Add(
 		Box::new(Expr::Add(
 		Box::new(Expr::Add(
@@ -200,26 +235,24 @@ fn main() {
 			Box::new(Expr::IfThenElse(Box::new(Expr::Equals(Box::new(Expr::State("Alive".to_string())), Box::new(Expr::Neighbor( 0,  1)))), Box::new(Expr::Int(1)), Box::new(Expr::Int(0)))))),
 			Box::new(Expr::IfThenElse(Box::new(Expr::Equals(Box::new(Expr::State("Alive".to_string())), Box::new(Expr::Neighbor( 1, -1)))), Box::new(Expr::Int(1)), Box::new(Expr::Int(0)))))),
 			Box::new(Expr::IfThenElse(Box::new(Expr::Equals(Box::new(Expr::State("Alive".to_string())), Box::new(Expr::Neighbor( 1,  0)))), Box::new(Expr::Int(1)), Box::new(Expr::Int(0)))))),
-			Box::new(Expr::IfThenElse(Box::new(Expr::Equals(Box::new(Expr::State("Alive".to_string())), Box::new(Expr::Neighbor( 1,  1)))), Box::new(Expr::Int(1)), Box::new(Expr::Int(0)))));
-
-	let me = Expr::Neighbor(0, 0);
-
-	let expr: Expr = Expr::IfThenElse(
-		Box::new(Expr::And(
-			Box::new(Expr::Equals(Box::new(me.clone()), Box::new(Expr::State("Alive".to_string())))),
-			Box::new(Expr::Or(
-				Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(2)))),
-				Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(3))))
-			))
-		)),
-		Box::new(Expr::State("Alive".to_string())),
+			Box::new(Expr::IfThenElse(Box::new(Expr::Equals(Box::new(Expr::State("Alive".to_string())), Box::new(Expr::Neighbor( 1,  1)))), Box::new(Expr::Int(1)), Box::new(Expr::Int(0)))))),
 		Box::new(Expr::IfThenElse(
 			Box::new(Expr::And(
-				Box::new(Expr::Equals(Box::new(me.clone()), Box::new(Expr::State("Dead".to_string())))),
-				Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(3))))
+				Box::new(Expr::Equals(Box::new(Expr::Neighbor(0, 0)), Box::new(Expr::State("Alive".to_string())))),
+				Box::new(Expr::Or(
+					Box::new(Expr::Equals(Box::new(Expr::Identifier("n".to_string())), Box::new(Expr::Int(2)))),
+					Box::new(Expr::Equals(Box::new(Expr::Identifier("n".to_string())), Box::new(Expr::Int(3))))
+				))
 			)),
 			Box::new(Expr::State("Alive".to_string())),
-			Box::new(Expr::State("Dead".to_string()))
+			Box::new(Expr::IfThenElse(
+				Box::new(Expr::And(
+					Box::new(Expr::Equals(Box::new(Expr::Neighbor(0, 0)), Box::new(Expr::State("Dead".to_string())))),
+					Box::new(Expr::Equals(Box::new(Expr::Identifier("n".to_string())), Box::new(Expr::Int(3))))
+				)),
+				Box::new(Expr::State("Alive".to_string())),
+				Box::new(Expr::State("Dead".to_string()))
+			))
 		))
 	);
 
