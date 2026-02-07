@@ -12,17 +12,17 @@ enum Expr {
 	Neighbor(i32, i32),
 
 	// Boolean expressions
-	Equals(Box<Expr>, Box<Expr>),        // x == y   x is y
-	// LessThan(Expr, Expr),      // x < y
-	// GreaterThan(Expr, Expr),   // x > y
-	// And(Expr, Expr),           // x and y
-	// Or(Expr, Expr),            // x or y
-	// Not(Expr),                 // not x
+	Equals(Box<Expr>, Box<Expr>),      // x == y   x is y
+	LessThan(Box<Expr>, Box<Expr>),    // x < y
+	GreaterThan(Box<Expr>, Box<Expr>), // x > y
+	And(Box<Expr>, Box<Expr>),         // x and y
+	Or(Box<Expr>, Box<Expr>),          // x or y
+	Not(Box<Expr>),                    // not x
 
 	// Integer expressions
 	Int(i32),
 	Add(Box<Expr>, Box<Expr>),
-	// Sub(Expr, Expr),
+	Sub(Box<Expr>, Box<Expr>),
 
 	// Other
 	IfThenElse(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -49,6 +49,57 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			Value::State(cells[ni][nj].clone().into())
 		}
 		Expr::Equals(e1, e2) => Value::Bool(eval(e1, cells, i, j) == eval(e2, cells, i, j)),
+		Expr::LessThan(e1, e2) => {
+			if let Value::Int(n1) = eval(e1, cells, i, j) {
+				if let Value::Int(n2) = eval(e2, cells, i, j) {
+					Value::Bool(n1 < n2)
+				} else {
+					Value::Bool(false)
+				}
+			} else {
+				Value::Bool(false)
+			}
+		}
+		Expr::GreaterThan(e1, e2) => {
+			if let Value::Int(n1) = eval(e1, cells, i, j) {
+				if let Value::Int(n2) = eval(e2, cells, i, j) {
+					Value::Bool(n1 > n2)
+				} else {
+					Value::Bool(false)
+				}
+			} else {
+				Value::Bool(false)
+			}
+		}
+		Expr::And(e1, e2) => {
+			if let Value::Bool(b1) = eval(e1, cells, i, j) {
+				if let Value::Bool(b2) = eval(e2, cells, i, j) {
+					Value::Bool(b1 && b2)
+				} else {
+					Value::Bool(false)
+				}
+			} else {
+				Value::Bool(false)
+			}
+		}
+		Expr::Or(e1, e2) => {
+			if let Value::Bool(b1) = eval(e1, cells, i, j) {
+				if let Value::Bool(b2) = eval(e2, cells, i, j) {
+					Value::Bool(b1 || b2)
+				} else {
+					Value::Bool(false)
+				}
+			} else {
+				Value::Bool(false)
+			}
+		}
+		Expr::Not(e) => {
+			if let Value::Bool(b) = eval(e, cells, i, j) {
+				Value::Bool(!b)
+			} else {
+				Value::Bool(false)
+			}
+		}
 		Expr::IfThenElse(c, t, f) => {
 			if eval(c, cells, i, j) == Value::Bool(true) {
 				eval(t, cells, i, j)
@@ -62,6 +113,19 @@ fn eval(e: &Expr, cells: &[[String; N]; N], i: i32, j: i32) -> Value {
 			if let Value::Int(n1) = v1 {
 				if let Value::Int(n2) = v2 {
 					Value::Int(n1 + n2)
+				} else {
+					Value::Int(0)
+				}
+			} else {
+				Value::Int(0)
+			}
+		}
+		Expr::Sub(e1, e2) => {
+			let v1 = eval(e1, cells, i, j);
+			let v2 = eval(e2, cells, i, j);
+			if let Value::Int(n1) = v1 {
+				if let Value::Int(n2) = v2 {
+					Value::Int(n1 - n2)
 				} else {
 					Value::Int(0)
 				}
@@ -141,12 +205,23 @@ fn main() {
 	let me = Expr::Neighbor(0, 0);
 
 	let expr: Expr = Expr::IfThenElse(
-		Box::new(Expr::Equals(Box::new(me.clone()), Box::new(Expr::State("Alive".to_string())))),
-			Box::new(Expr::IfThenElse(Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(2)))), Box::new(Expr::State("Alive".to_string())),
-			Box::new(Expr::IfThenElse(Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(3)))), Box::new(Expr::State("Alive".to_string())),
-			Box::new(Expr::State("Dead".to_string())))))),
-			Box::new(Expr::IfThenElse(Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(3)))), Box::new(Expr::State("Alive".to_string())),
-			Box::new(Expr::State("Dead".to_string())))));
+		Box::new(Expr::And(
+			Box::new(Expr::Equals(Box::new(me.clone()), Box::new(Expr::State("Alive".to_string())))),
+			Box::new(Expr::Or(
+				Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(2)))),
+				Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(3))))
+			))
+		)),
+		Box::new(Expr::State("Alive".to_string())),
+		Box::new(Expr::IfThenElse(
+			Box::new(Expr::And(
+				Box::new(Expr::Equals(Box::new(me.clone()), Box::new(Expr::State("Dead".to_string())))),
+				Box::new(Expr::Equals(Box::new(neighbor_count.clone()), Box::new(Expr::Int(3))))
+			)),
+			Box::new(Expr::State("Alive".to_string())),
+			Box::new(Expr::State("Dead".to_string()))
+		))
+	);
 
 	// print!("{:?}\n", expr);
 
